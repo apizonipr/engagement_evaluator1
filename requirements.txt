@@ -1,3 +1,10 @@
-streamlit
-pandas
-plotly
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+alembic
+psycopg2-binary
+httpx
+python-dotenv
+schedule
+requests
