@@ -1,436 +1,434 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from enum import Enum
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from collections import Counter
+import re
+import urllib.parse
 
-st.set_page_config(page_title="Monitor de Enquadramento Midiático", layout="wide")
+st.set_page_config(
+    page_title="Monitor de Enquadramento Midiático",
+    page_icon="📰",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+DICIONARIO_ENQUADRAMENTO = {
+    "Econômico": [
+        "economia", "mercado", "financeiro", "investimento", "bolsa", "empresas",
+        "negócios", "lucro", "receita", "despesa", "inflação", "juros", "crescimento"
+    ],
+    "Político": [
+        "governo", "política", "congresso", "senado", "câmara", "deputado", "senador",
+        "ministro", "presidente", "eleição", "voto", "partido", "oposição", "aliança"
+    ],
+    "Social": [
+        "sociedade", "população", "comunidade", "pessoas", "família", "trabalhadores",
+        "saúde", "educação", "moradia", "desigualdade", "pobreza", "direitos"
+    ],
+    "Segurança": [
+        "crime", "violência", "polícia", "segurança", "investigação", "prisão",
+        "traficante", "roubo", "homicídio", "ordem pública", "forças armadas"
+    ],
+    "Ambiental": [
+        "meio ambiente", "clima", "sustentabilidade", "amazônia", "desmatamento",
+        "energia", "poluição", "recursos naturais", "biodiversidade", "aquecimento"
+    ],
+    "Judicial": [
+        "justiça", "tribunal", "supremo", "stf", "processo", "julgamento", "direito",
+        "constituição", "acusado", "testemunha", "advogado", "magistrado"
+    ],
+    "Internacional": [
+        "exterior", "internacional", "relações exteriores", "diplomacia", "país",
+        "estrangeiro", "global", "nações unidas", "ue", "oit", "fronteira"
+    ]
+}
 
-class TipoEnquadramento(Enum):
-    CONFRONTO_DIRETO = "confronto_direto"
-    NARRATIVA_GOVERNO = "narrativa_governo"
-    NARRATIVA_OPOSICAO = "narrativa_oposicao"
-    ANALISE_FATO = "analise_fato"
-    AUSENCIA = "ausencia"
-
-
-class Veiculo(Enum):
-    G1 = "G1"
-    FOLHA = "Folha de S.Paulo"
-    ESTADAO = "Estadão"
-    GLOBO = "Globo"
-    RECORD = "Record"
-    BAND = "Band"
-    CNN = "CNN Brasil"
-    JOVEM_PAN = "Jovem Pan"
-    BR247 = "Brasil 247"
-    REVISTA_F = "Revista Fórum"
-
-
-class TipoMateria(Enum):
-    NOTICIA = "noticia"
-    ARTIGO = "artigo"
-    EDITORIAL = "editorial"
-    COLUNA = "coluna"
-    VIDEO = "video"
-
-
-class Situacao(Enum):
-    PENDENTE = "pendente"
-    APROVADO = "aprovado"
-    REPROVADO = "reprovado"
-
-
-@dataclass
-class Coleta:
-    id: int
-    titulo: str
-    veiculo: Veiculo
-    tipo_materia: TipoMateria
-    data_publicacao: datetime
-    url: str
-    coletor: str
-    data_coleta: datetime = field(default_factory=datetime.now)
-    situacao: Situacao = Situacao.PENDENTE
-
-
-@dataclass
-class Analise:
-    coleta_id: int
-    analista: str
-    enquadramento: TipoEnquadramento
-    justificativa: str
-    pessoas: List[str] = field(default_factory=list)
-    organizacoes: List[str] = field(default_factory=list)
-    data_analise: datetime = field(default_factory=datetime.now)
-    revisada: bool = False
-
-
-class MonitorEnquadramento:
-    def __init__(self):
-        self.coletas: List[Coleta] = []
-        self.analises: List[Analise] = []
-        self.prox_id = 1
-
-    def obter_label_enquadramento(self, tipo: TipoEnquadramento) -> str:
-        labels = {
-            TipoEnquadramento.CONFRONTO_DIRETO: "Confronto Direto",
-            TipoEnquadramento.NARRATIVA_GOVERNO: "Narrativa Governo",
-            TipoEnquadramento.NARRATIVA_OPOSICAO: "Narrativa Oposição",
-            TipoEnquadramento.ANALISE_FATO: "Análise de Fato",
-            TipoEnquadramento.AUSENCIA: "Ausência de Enquadramento",
-        }
-        return labels.get(tipo, tipo.value)
-
-    def obter_label_tipo_materia(self, tipo: TipoMateria) -> str:
-        labels = {
-            TipoMateria.NOTICIA: "Notícia",
-            TipoMateria.ARTIGO: "Artigo",
-            TipoMateria.EDITORIAL: "Editorial",
-            TipoMateria.COLUNA: "Coluna",
-            TipoMateria.VIDEO: "Vídeo",
-        }
-        return labels.get(tipo, tipo.value)
-
-    def obter_label_situacao(self, situacao: Situacao) -> str:
-        labels = {
-            Situacao.PENDENTE: "Pendente",
-            Situacao.APROVADO: "Aprovado",
-            Situacao.REPROVADO: "Reprovado",
-        }
-        return labels.get(situacao, situacao.value)
-
-    def adicionar_coleta(self, titulo: str, veiculo: Veiculo, tipo_materia: TipoMateria, url: str, coletor: str) -> Coleta:
-        coleta = Coleta(
-            id=self.prox_id,
-            titulo=titulo,
-            veiculo=veiculo,
-            tipo_materia=tipo_materia,
-            data_publicacao=datetime.now(),
-            url=url,
-            coletor=coletor,
-        )
-        self.coletas.append(coleta)
-        self.prox_id += 1
-        return coleta
-
-    def adicionar_analise(self, coleta_id: int, analista: str, enquadramento: TipoEnquadramento, justificativa: str, pessoas: List[str], organizacoes: List[str]) -> Analise:
-        analise = Analise(
-            coleta_id=coleta_id,
-            analista=analista,
-            enquadramento=enquadramento,
-            justificativa=justificativa,
-            pessoas=pessoas,
-            organizacoes=organizacoes,
-        )
-        self.analises.append(analise)
-        return analise
-
-    def obter_analises_por_coleta(self, coleta_id: int) -> List[Analise]:
-        return [a for a in self.analises if a.coleta_id == coleta_id]
-
-    def obter_resumo(self) -> Dict:
-        total_coletas = len(self.coletas)
-        total_analises = len(self.analises)
-        pendentes = len([c for c in self.coletas if c.situacao == Situacao.PENDENTE])
-        aprovados = len([c for c in self.coletas if c.situacao == Situacao.APROVADO])
-        reprovados = len([c for c in self.coletas if c.situacao == Situacao.REPROVADO])
-        return {
-            "total_coletas": total_coletas,
-            "total_analises": total_analises,
-            "pendentes": pendentes,
-            "aprovados": aprovados,
-            "reprovados": reprovados,
-        }
-
-    def obter_distribuicao_enquadramento(self) -> pd.DataFrame:
-        if not self.analises:
-            return pd.DataFrame(columns=["enquadramento", "quantidade"])
-        dados = {}
-        for analise in self.analises:
-            label = self.obter_label_enquadramento(analise.enquadramento)
-            dados[label] = dados.get(label, 0) + 1
-        df = pd.DataFrame(list(dados.items()), columns=["enquadramento", "quantidade"])
-        return df
-
-
-@st.cache_resource
-def get_monitor() -> MonitorEnquadramento:
-    return MonitorEnquadramento()
-
-
-def inicializar_dados(monitor: MonitorEnquadramento):
-    if not monitor.coletas:
-        monitor.adicionar_coleta(
-            titulo="Governo anuncia novo pacote de medidas econômicas",
-            veiculo=Veiculo.G1,
-            tipo_materia=TipoMateria.NOTICIA,
-            url="https://g1.globo.com/economia",
-            coletor="sistema",
-        )
-        monitor.adicionar_coleta(
-            titulo="Oposição critica gestão federal em debate na Câmara",
-            veiculo=Veiculo.FOLHA,
-            tipo_materia=TipoMateria.NOTICIA,
-            url="https://folha.uol.com.br/poder",
-            coletor="sistema",
-        )
-        monitor.adicionar_coleta(
-            titulo="Análise: os números por trás da polêmica orçamentária",
-            veiculo=Veiculo.ESTADAO,
-            tipo_materia=TipoMateria.COLUNA,
-            url="https://estadao.com.br/economia",
-            coletor="sistema",
-        )
-        monitor.adicionar_coleta(
-            titulo="Presidente e governador trocam acusações em evento",
-            veiculo=Veiculo.GLOBO,
-            tipo_materia=TipoMateria.VIDEO,
-            url="https://globo.com/jornal",
-            coletor="sistema",
-        )
-
-        for coleta in monitor.coletas:
-            if coleta.id == 1:
-                monitor.adicionar_analise(
-                    coleta_id=coleta.id,
-                    analista="sistema",
-                    enquadramento=TipoEnquadramento.NARRATIVA_GOVERNO,
-                    justificativa="Matéria reproduz discurso oficial sem contraposição.",
-                    pessoas=["ministro da economia"],
-                    organizacoes=["governo federal"],
-                )
-            elif coleta.id == 2:
-                monitor.adicionar_analise(
-                    coleta_id=coleta.id,
-                    analista="sistema",
-                    enquadramento=TipoEnquadramento.NARRATIVA_OPOSICAO,
-                    justificativa="Foco exclusivo nas críticas da oposição.",
-                    pessoas=["líder da oposição"],
-                    organizacoes=["partido de oposição"],
-                )
-            elif coleta.id == 3:
-                monitor.adicionar_analise(
-                    coleta_id=coleta.id,
-                    analista="sistema",
-                    enquadramento=TipoEnquadramento.ANALISE_FATO,
-                    justificativa="Apresenta dados e contexto sobre o tema.",
-                    pessoas=["economista"],
-                    organizacoes=["instituto de pesquisa"],
-                )
-            elif coleta.id == 4:
-                monitor.adicionar_analise(
-                    coleta_id=coleta.id,
-                    analista="sistema",
-                    enquadramento=TipoEnquadramento.CONFRONTO_DIRETO,
-                    justificativa="Registro direto de embate entre autoridades.",
-                    pessoas=["presidente", "governador"],
-                    organizacoes=["governo federal", "governo estadual"],
-                )
-
-        for coleta in monitor.coletas:
-            coleta.situacao = Situacao.APROVADO
-
-
-def render_sidebar(monitor: MonitorEnquadramento):
-    with st.sidebar:
-        st.title("Monitor")
-        st.markdown("---")
-        menu = st.radio("Navegação", ["Dashboard", "Coletas", "Análises", "Nova Coleta", "Nova Análise"])
-        st.markdown("---")
-        resumo = monitor.obter_resumo()
-        st.metric("Coletas", resumo["total_coletas"])
-        st.metric("Análises", resumo["total_analises"])
-        st.markdown("---")
-        st.caption("Monitor de Enquadramento Midiático v1.0")
-    return menu
-
-
-def render_dashboard(monitor: MonitorEnquadramento):
-    st.title("Dashboard")
-    st.markdown("---")
-
-    resumo = monitor.obter_resumo()
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total Coletas", resumo["total_coletas"])
-    col2.metric("Total Análises", resumo["total_analises"])
-    col3.metric("Pendentes", resumo["pendentes"])
-    col4.metric("Aprovados", resumo["aprovados"])
-    col5.metric("Reprovados", resumo["reprovados"])
-
-    st.markdown("---")
-
-    df_pie = monitor.obter_distribuicao_enquadramento()
-
-    cores = {
-        "Confronto Direto": "#FF6B6B",
-        "Narrativa Governo": "#4ECDC4",
-        "Narrativa Oposição": "#45B7D1",
-        "Análise de Fato": "#96CEB4",
-        "Ausência de Enquadramento": "#D3D3D3",
+EXEMPLOS_NOTICIAS = [
+    {
+        "id": 1,
+        "data": datetime.now() - timedelta(days=1),
+        "fonte": "Agência Brasil",
+        "manchete": "Governo anuncia cortes de gastos e aumento de investimentos em infraestrutura",
+        "texto": "O governo federal anunciou nesta terça-feira um pacote de medidas econômicas que inclui corte de gastos e aumento de investimentos em infraestrutura. A iniciativa visa estimular o crescimento econômico e reduzir a inflação.",
+        "url": "https://agenciabrasil.ebc.com.br/economia/noticia/2024-01/governo-anuncia-cortes-de-gastos",
+        "tendencia": "Neutro"
+    },
+    {
+        "id": 2,
+        "data": datetime.now() - timedelta(days=3),
+        "fonte": "Folha de S.Paulo",
+        "manchete": "Congresso aprova projeto que amplia benefícios sociais em ano eleitoral",
+        "texto": "O Congresso Nacional aprovou nesta quarta-feira um projeto de lei que amplia benefícios sociais. A oposição criticou a medida, afirmando que ela tem caráter eleitoreiro e pode afetar as contas públicas.",
+        "url": "https://www1.folha.uol.com.br/poder/2024/01/congresso-aprova-beneficios-sociais.shtml",
+        "tendencia": "Neutro"
+    },
+    {
+        "id": 3,
+        "data": datetime.now() - timedelta(days=6),
+        "fonte": "GloboNews",
+        "manchete": "Aumento da violência urbana preocupa moradores de grandes centros",
+        "texto": "Dados recentes indicam crescimento da violência urbana em grandes centros. Especialistas apontam desigualdade social e falta de investimento em segurança pública como principais causas.",
+        "url": "https://g1.globo.com/globonews/jornal-das-dez/violencia-urbana.html",
+        "tendencia": "Negativo"
+    },
+    {
+        "id": 4,
+        "data": datetime.now() - timedelta(days=8),
+        "fonte": "Valor Econômico",
+        "manchete": "Mercado financeiro reage positivamente a sinais de estabilidade política",
+        "texto": "O mercado financeiro reagiu de forma positiva nesta quinta-feira a sinais de estabilidade política. O Ibovespa subiu e o dólar recuou, refletindo o otimismo dos investidores.",
+        "url": "https://valor.globo.com/financas/noticia/2024/01/mercado-reage-positivamente.ghtml",
+        "tendencia": "Positivo"
+    },
+    {
+        "id": 5,
+        "data": datetime.now() - timedelta(days=12),
+        "fonte": "O Globo",
+        "manchete": "Desmatamento na Amazônia cai pelo terceiro mês consecutivo, mostram dados",
+        "texto": "Dados oficiais mostram queda no desmatamento na Amazônia pelo terceiro mês consecutivo. Ambientalistas celebram a redução, mas alertam para a necessidade de políticas de longo prazo.",
+        "url": "https://oglobo.globo.com/meio-ambiente/desmatamento-amazonia-cai.html",
+        "tendencia": "Positivo"
+    },
+    {
+        "id": 6,
+        "data": datetime.now() - timedelta(days=25),
+        "fonte": "Estadão",
+        "manchete": "STF retoma julgamento sobre tributação de grandes fortunas",
+        "texto": "O Supremo Tribunal Federal retomou nesta terça-feira o julgamento sobre a tributação de grandes fortunas. A decisão pode impactar a arrecadação e a distribuição de renda no país.",
+        "url": "https://www.estadao.com.br/politica/stf-tributacao-grandes-fortunas.html",
+        "tendencia": "Neutro"
     }
-
-    col_grafico, col_tabela = st.columns([2, 1])
-
-    with col_grafico:
-        if not df_pie.empty:
-            fig = px.pie(
-                df_pie,
-                values="quantidade",
-                names="enquadramento",
-                title="Distribuição de Enquadramento",
-                color="enquadramento",
-                color_discrete_map=cores,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Nenhuma análise disponível para exibir o gráfico.")
-
-    with col_tabela:
-        st.subheader("Resumo por Enquadramento")
-        st.dataframe(df_pie, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-    st.subheader("Últimas Análises")
-    if monitor.analises:
-        analises_recentes = sorted(monitor.analises, key=lambda x: x.data_analise, reverse=True)[:10]
-        dados = []
-        for analise in analises_recentes:
-            coleta = next((c for c in monitor.coletas if c.id == analise.coleta_id), None)
-            if coleta:
-                dados.append({
-                    "Data": analise.data_analise.strftime("%d/%m/%Y %H:%M"),
-                    "Veículo": coleta.veiculo.value,
-                    "Título": coleta.titulo,
-                    "Enquadramento": monitor.obter_label_enquadramento(analise.enquadramento),
-                    "Analista": analise.analista,
-                })
-        df = pd.DataFrame(dados)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("Nenhuma análise registrada.")
+]
 
 
-def render_coletas(monitor: MonitorEnquadramento):
-    st.title("Coletas")
-    st.markdown("---")
+def calcular_enquadramento(texto):
+    texto = texto.lower()
+    texto = re.sub(r"[^\w\s]", " ", texto)
+    tokens = texto.split()
 
-    if not monitor.coletas:
-        st.info("Nenhuma coleta registrada.")
-        return
+    scores = {}
+    for enquadramento, palavras in DICIONARIO_ENQUADRAMENTO.items():
+        score = 0
+        for palavra in palavras:
+            if " " in palavra:
+                score += texto.count(palavra)
+            else:
+                score += tokens.count(palavra)
+        scores[enquadramento] = score
 
-    dados = []
-    for coleta in monitor.coletas:
-        dados.append({
-            "ID": coleta.id,
-            "Título": coleta.titulo,
-            "Veículo": coleta.veiculo.value,
-            "Tipo": monitor.obter_label_tipo_materia(coleta.tipo_materia),
-            "Publicação": coleta.data_publicacao.strftime("%d/%m/%Y %H:%M"),
-            "Coletor": coleta.coletor,
-            "Situação": monitor.obter_label_situacao(coleta.situacao),
+    total = sum(scores.values())
+    if total == 0:
+        scores["Neutro / Indeterminado"] = 1
+        total = 1
+
+    percentuais = {k: round(v / total * 100, 2) for k, v in scores.items()}
+    principal = max(percentuais, key=percentuais.get)
+
+    return percentuais, principal
+
+
+def detectar_tendencia(texto):
+    texto = texto.lower()
+    positivas = ["crescimento", "aumento", "queda", "redução", "positivo", "sucesso", "avanço",
+                 "melhora", "benefício", "ganho", "superávit", "recuperação", "estabilidade"]
+    negativas = ["crise", "queda", "aumento", "violência", "preocupação", "problema", "escândalo",
+                 "corrupção", "risco", "ameaça", "colapso", "recessão", "desigualdade", "desmatamento"]
+
+    pos = sum(1 for p in positivas if p in texto)
+    neg = sum(1 for n in negativas if n in texto)
+
+    if pos > neg:
+        return "Positivo"
+    elif neg > pos:
+        return "Negativo"
+    return "Neutro"
+
+
+@st.cache_data(ttl=3600)
+def carregar_base_noticias():
+    df = pd.DataFrame(EXEMPLOS_NOTICIAS)
+    df["data"] = pd.to_datetime(df["data"]).dt.date
+    return df
+
+
+def extrair_enquadramentos_df(df):
+    resultados = []
+    for _, row in df.iterrows():
+        percentuais, principal = calcular_enquadramento(row["texto"])
+        resultados.append({
+            "id": row["id"],
+            "data": row["data"],
+            "fonte": row["fonte"],
+            "manchete": row["manchete"],
+            "url": row["url"],
+            "enquadramento_principal": principal,
+            "tendencia": row["tendencia"],
+            **{f"pct_{k}": v for k, v in percentuais.items()}
         })
-    df = pd.DataFrame(dados)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    return pd.DataFrame(resultados)
 
 
-def render_analises(monitor: MonitorEnquadramento):
-    st.title("Análises")
-    st.markdown("---")
-
-    if not monitor.analises:
-        st.info("Nenhuma análise registrada.")
-        return
-
-    dados = []
-    for analise in monitor.analises:
-        coleta = next((c for c in monitor.coletas if c.id == analise.coleta_id), None)
-        if coleta:
-            dados.append({
-                "ID": analise.coleta_id,
-                "Título": coleta.titulo,
-                "Veículo": coleta.veiculo.value,
-                "Enquadramento": monitor.obter_label_enquadramento(analise.enquadramento),
-                "Analista": analise.analista,
-                "Data Análise": analise.data_analise.strftime("%d/%m/%Y %H:%M"),
-                "Revisada": "Sim" if analise.revisada else "Não",
-            })
-    df = pd.DataFrame(dados)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+def formatar_scorecard(percentuais, principal):
+    linhas = []
+    for k, v in sorted(percentuais.items(), key=lambda x: x[1], reverse=True):
+        destaque = "➤ " if k == principal else "   "
+        linhas.append(f"{destaque}{k}: {v}%")
+    return "\n".join(linhas)
 
 
-def render_nova_coleta(monitor: MonitorEnquadramento):
-    st.title("Nova Coleta")
-    st.markdown("---")
+st.sidebar.title("📰 Monitor de Enquadramento Midiático")
+st.sidebar.markdown("Análise comparativa de enquadramentos na imprensa brasileira.")
 
-    with st.form("form_coleta"):
-        titulo = st.text_input("Título")
-        veiculo = st.selectbox("Veículo", [v for v in Veiculo])
-        tipo_materia = st.selectbox("Tipo de Matéria", [t for t in TipoMateria])
-        url = st.text_input("URL")
-        coletor = st.text_input("Coletor", value="usuário")
-        submit = st.form_submit_button("Salvar Coleta")
+pagina = st.sidebar.radio("Navegação", ["Painel Principal", "Comparador de Notícias", "Notícias por Período"])
 
-    if submit:
-        if not titulo or not url or not coletor:
-            st.error("Preencha todos os campos obrigatórios.")
+base_df = carregar_base_noticias()
+analise_df = extrair_enquadramentos_df(base_df)
+
+if pagina == "Painel Principal":
+    st.title("Monitor de Enquadramento Midiático")
+    st.markdown("**Metodologia inspirada em estudos de comunicação política e análise de mídia (FGV style).**")
+
+    st.header("1. Fundamentação Teórica: O Que É Enquadramento Midiático?")
+    st.markdown("""
+    O **enquadramento midiático** (*media framing*) refere-se ao processo pelo qual a mídia seleciona,
+    destaca e organiza informações de modo a construir uma determinada interpretação sobre um evento,
+    problema ou ator social. Em vez de descrever a realidade de forma neutra, o enquadramento
+    orienta a atenção do público para aspectos específicos, atribuindo causalidade, moralidade e
+    responsabilidade.
+
+    A teoria dos enquadramentos (*Framing Theory*) foi desenvolvida originalmente por Erving Goffman
+    (1974) e posteriormente aplicada à comunicação e à ciência política por pesquisadores como
+    Robert Entman (1993). De acordo com Entman, enquadrar uma notícia significa “selecionar alguns
+    aspectos de uma percepção realidade percebida e torná-los mais salientes em uma mensagem de
+    comunicação, de forma a promover uma definição particular do problema, interpretação causal,
+    avaliação moral e/ou recomendação de tratamento”.
+
+    No contexto brasileiro, o estudo de enquadramentos é fundamental para compreender como temas
+    como economia, segurança pública, meio ambiente e política institucional são apresentados ao
+    público. A análise de enquadramento permite identificar padrões de cobertura, tendências
+    ideológicas, hierarquias de importância e possíveis vieses nos relatos jornalísticos.
+
+    **Como este monitor funciona:**
+    - Identifica a presença de palavras-chave associadas a sete enquadramentos clássicos.
+    - Calcula a distribuição percentual de cada enquadramento no texto.
+    - Determina o enquadramento dominante e a tendência do tom da notícia.
+    - Oferece visualização comparativa entre múltiplas fontes e períodos.
+    """)
+
+    st.header("2. Distribuição Geral de Enquadramentos na Base")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        contagem = analise_df["enquadramento_principal"].value_counts().reset_index()
+        contagem.columns = ["Enquadramento", "Quantidade"]
+        fig = px.bar(
+            contagem,
+            x="Enquadramento",
+            y="Quantidade",
+            color="Enquadramento",
+            title="Enquadramentos Principais na Base",
+            text="Quantidade",
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        fig.update_layout(showlegend=False, xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        tendencia = analise_df["tendencia"].value_counts().reset_index()
+        tendencia.columns = ["Tendência", "Quantidade"]
+        fig2 = px.pie(
+            tendencia,
+            values="Quantidade",
+            names="Tendência",
+            title="Distribuição de Tendência das Notícias",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    st.header("3. Evolução Temporal dos Enquadramentos")
+    evolucao = analise_df.groupby(["data", "enquadramento_principal"]).size().reset_index(name="quantidade")
+    fig3 = px.line(
+        evolucao,
+        x="data",
+        y="quantidade",
+        color="enquadramento_principal",
+        markers=True,
+        title="Evolução dos Enquadramentos ao Longo do Tempo",
+        labels={"data": "Data", "quantidade": "Quantidade", "enquadramento_principal": "Enquadramento"},
+        color_discrete_sequence=px.colors.qualitative.Bold
+    )
+    fig3.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5))
+    st.plotly_chart(fig3, use_container_width=True)
+
+    st.header("4. Tabela Resumida de Notícias Analisadas")
+    st.dataframe(
+        analise_df[["data", "fonte", "manchete", "enquadramento_principal", "tendencia"]].sort_values("data", ascending=False),
+        use_container_width=True,
+        hide_index=True
+    )
+
+elif pagina == "Comparador de Notícias":
+    st.title("Comparador de Enquadramentos entre Duas Notícias")
+    st.markdown("Insira as URLs e os textos/manchetes de duas notícias para comparar seus enquadramentos.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Notícia A")
+        url_a = st.text_input("URL da Notícia A", value="https://exemplo.com/noticia-a", key="url_a")
+        manchete_a = st.text_input("Manchete A", value="Governo anuncia medidas econômicas para conter inflação", key="manchete_a")
+        texto_a = st.text_area("Texto A", value="""O governo anunciou novas medidas econômicas para conter a inflação e estimular o crescimento do mercado. Empresários e investidores reagiram de forma positiva às medidas, que incluem corte de juros e redução de impostos para setores estratégicos.""", key="texto_a", height=200)
+
+    with col2:
+        st.subheader("Notícia B")
+        url_b = st.text_input("URL da Notícia B", value="https://exemplo.com/noticia-b", key="url_b")
+        manchete_b = st.text_input("Manchete B", value="Especialistas questionam impacto social das medidas econômicas do governo", key="manchete_b")
+        texto_b = st.text_area("Texto B", value="""Especialistas em políticas sociais questionam o impacto das medidas econômicas anunciadas pelo governo. Segundo analistas, a redução de impostos pode beneficiar grandes empresas enquanto trabalhadores e famílias de baixa renda terão pouco ganho real.""", key="texto_b", height=200)
+
+    if st.button("Comparar Enquadramentos", type="primary"):
+        texto_completo_a = f"{manchete_a} {texto_a}"
+        texto_completo_b = f"{manchete_b} {texto_b}"
+
+        percentuais_a, principal_a = calcular_enquadramento(texto_completo_a)
+        percentuais_b, principal_b = calcular_enquadramento(texto_completo_b)
+        tendencia_a = detectar_tendencia(texto_completo_a)
+        tendencia_b = detectar_tendencia(texto_completo_b)
+
+        st.divider()
+
+        col_res_a, col_res_b = st.columns(2)
+
+        with col_res_a:
+            st.markdown("### Notícia A")
+            st.markdown(f"**URL:** [{url_a}]({url_a})")
+            st.markdown(f"**Manchete:** {manchete_a}")
+            st.markdown(f"**Enquadramento dominante:** `{principal_a}`")
+            st.markdown(f"**Tendência:** `{tendencia_a}`")
+            st.markdown("**Distribuição de scores:**")
+            st.text(formatar_scorecard(percentuais_a, principal_a))
+
+        with col_res_b:
+            st.markdown("### Notícia B")
+            st.markdown(f"**URL:** [{url_b}]({url_b})")
+            st.markdown(f"**Manchete:** {manchete_b}")
+            st.markdown(f"**Enquadramento dominante:** `{principal_b}`")
+            st.markdown(f"**Tendência:** `{tendencia_b}`")
+            st.markdown("**Distribuição de scores:**")
+            st.text(formatar_scorecard(percentuais_b, principal_b))
+
+        st.markdown("### Comparação Visual Lado a Lado")
+
+        categorias = list(DICIONARIO_ENQUADRAMENTO.keys())
+        valores_a = [percentuais_a.get(c, 0) for c in categorias]
+        valores_b = [percentuais_b.get(c, 0) for c in categorias]
+
+        fig_comp = go.Figure()
+        fig_comp.add_trace(go.Bar(
+            x=categorias,
+            y=valores_a,
+            name="Notícia A",
+            marker_color="#1f77b4"
+        ))
+        fig_comp.add_trace(go.Bar(
+            x=categorias,
+            y=valores_b,
+            name="Notícia B",
+            marker_color="#ff7f0e"
+        ))
+        fig_comp.update_layout(
+            barmode="group",
+            title="Comparação de Enquadramentos (%)",
+            xaxis_title="Enquadramento",
+            yaxis_title="Percentual",
+            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
+            yaxis_range=[0, 100]
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+        st.markdown("### Análise Comparativa")
+        st.markdown(f"""
+        - A **Notícia A** ({url_a}) é predominantemente enquadrada como **`{principal_a}`**, com tendência **`{tendencia_a}`**.
+        - A **Notícia B** ({url_b}) é predominantemente enquadrada como **`{principal_b}`**, com tendência **`{tendencia_b}`**.
+        - Diferença de enquadramento principal: **{'Mesmo enquadramento' if principal_a == principal_b else 'Enquadramentos distintos'}**.
+        """)
+
+elif pagina == "Notícias por Período":
+    st.title("Notícias Filtradas por Período")
+    st.markdown("Visualize notícias e seus enquadramentos filtradas por semana, mês ou todo o período disponível.")
+
+    abas = st.tabs(["Semana", "Mês", "Geral"])
+    hoje = datetime.now().date()
+
+    with abas[0]:
+        inicio_semana = hoje - timedelta(days=7)
+        df_semana = analise_df[analise_df["data"] >= inicio_semana]
+        st.markdown(f"**Período:** {inicio_semana} a {hoje}")
+        st.markdown(f"**Total de notícias:** {len(df_semana)}")
+
+        if not df_semana.empty:
+            contagem_semana = df_semana["enquadramento_principal"].value_counts().reset_index()
+            contagem_semana.columns = ["Enquadramento", "Quantidade"]
+            fig_s = px.bar(
+                contagem_semana,
+                x="Enquadramento",
+                y="Quantidade",
+                color="Enquadramento",
+                title="Enquadramentos Principais na Semana",
+                text="Quantidade",
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            fig_s.update_layout(showlegend=False, xaxis_tickangle=-45)
+            st.plotly_chart(fig_s, use_container_width=True)
+            st.dataframe(df_semana[["data", "fonte", "manchete", "enquadramento_principal", "tendencia"]].sort_values("data", ascending=False), use_container_width=True, hide_index=True)
         else:
-            coleta = monitor.adicionar_coleta(titulo, veiculo, tipo_materia, url, coletor)
-            st.success(f"Coleta {coleta.id} registrada com sucesso.")
+            st.info("Nenhuma notícia disponível para a semana selecionada.")
 
+    with abas[1]:
+        inicio_mes = hoje - timedelta(days=30)
+        df_mes = analise_df[analise_df["data"] >= inicio_mes]
+        st.markdown(f"**Período:** {inicio_mes} a {hoje}")
+        st.markdown(f"**Total de notícias:** {len(df_mes)}")
 
-def render_nova_analise(monitor: MonitorEnquadramento):
-    st.title("Nova Análise")
-    st.markdown("---")
-
-    if not monitor.coletas:
-        st.info("Nenhuma coleta disponível para análise.")
-        return
-
-    opcoes_coleta = {f"{c.id} - {c.titulo} ({c.veiculo.value})": c.id for c in monitor.coletas}
-
-    with st.form("form_analise"):
-        coleta_label = st.selectbox("Coleta", list(opcoes_coleta.keys()))
-        coleta_id = opcoes_coleta[coleta_label]
-        analista = st.text_input("Analista", value="usuário")
-        enquadramento = st.selectbox("Enquadramento", [e for e in TipoEnquadramento])
-        justificativa = st.text_area("Justificativa")
-        pessoas = st.text_input("Pessoas mencionadas (separadas por vírgula)")
-        organizacoes = st.text_input("Organizações mencionadas (separadas por vírgula)")
-        submit = st.form_submit_button("Salvar Análise")
-
-    if submit:
-        if not analista or not justificativa:
-            st.error("Preencha todos os campos obrigatórios.")
+        if not df_mes.empty:
+            contagem_mes = df_mes["enquadramento_principal"].value_counts().reset_index()
+            contagem_mes.columns = ["Enquadramento", "Quantidade"]
+            fig_m = px.bar(
+                contagem_mes,
+                x="Enquadramento",
+                y="Quantidade",
+                color="Enquadramento",
+                title="Enquadramentos Principais no Mês",
+                text="Quantidade",
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            fig_m.update_layout(showlegend=False, xaxis_tickangle=-45)
+            st.plotly_chart(fig_m, use_container_width=True)
+            st.dataframe(df_mes[["data", "fonte", "manchete", "enquadramento_principal", "tendencia"]].sort_values("data", ascending=False), use_container_width=True, hide_index=True)
         else:
-            lista_pessoas = [p.strip() for p in pessoas.split(",") if p.strip()]
-            lista_org = [o.strip() for o in organizacoes.split(",") if o.strip()]
-            analise = monitor.adicionar_analise(coleta_id, analista, enquadramento, justificativa, lista_pessoas, lista_org)
-            coleta = next((c for c in monitor.coletas if c.id == coleta_id), None)
-            if coleta:
-                coleta.situacao = Situacao.APROVADO
-            st.success(f"Análise da coleta {analise.coleta_id} registrada com sucesso.")
+            st.info("Nenhuma notícia disponível para o mês selecionado.")
 
+    with abas[2]:
+        st.markdown("**Período:** Todo o período disponível")
+        st.markdown(f"**Total de notícias:** {len(analise_df)}")
 
-def main():
-    monitor = get_monitor()
-    inicializar_dados(monitor)
-    menu = render_sidebar(monitor)
+        contagem_geral = analise_df["enquadramento_principal"].value_counts().reset_index()
+        contagem_geral.columns = ["Enquadramento", "Quantidade"]
+        fig_g = px.bar(
+            contagem_geral,
+            x="Enquadramento",
+            y="Quantidade",
+            color="Enquadramento",
+            title="Enquadramentos Principais no Período Geral",
+            text="Quantidade",
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        fig_g.update_layout(showlegend=False, xaxis_tickangle=-45)
+        st.plotly_chart(fig_g, use_container_width=True)
 
-    if menu == "Dashboard":
-        render_dashboard(monitor)
-    elif menu == "Coletas":
-        render_coletas(monitor)
-    elif menu == "Análises":
-        render_analises(monitor)
-    elif menu == "Nova Coleta":
-        render_nova_coleta(monitor)
-    elif menu == "Nova Análise":
-        render_nova_analise(monitor)
+        st.dataframe(analise_df[["data", "fonte", "manchete", "enquadramento_principal", "tendencia"]].sort_values("data", ascending=False), use_container_width=True, hide_index=True)
 
-
-if __name__ == "__main__":
-    main()
+st.sidebar.markdown("---")
+st.sidebar.markdown("Desenvolvido para fins educacionais e de pesquisa em comunicação política.")
