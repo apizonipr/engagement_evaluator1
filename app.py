@@ -551,4 +551,4 @@ def main():
         sobre()
 
 if __name__ == "__main__":
-    main()para fins educacionais e de pesquisa em comunicação política.)
+    main()para fins educacionais e de pesquisa em comunicação política.')'
