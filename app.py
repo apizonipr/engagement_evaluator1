@@ -50,7 +50,7 @@ EXEMPLOS_NOTICIAS = [
     {
         "id": 1,
         "data": datetime.now() - timedelta(days=1),
-        "fonte": "Agência Brasil",
+        "fonte": ,
         "manchete": "Governo anuncia cortes de gastos e aumento de investimentos em infraestrutura",
         "texto": "O governo federal anunciou nesta terça-feira um pacote de medidas econômicas que inclui corte de gastos e aumento de investimentos em infraestrutura. A iniciativa visa estimular o crescimento econômico e reduzir a inflação.",
         "url": "https://agenciabrasil.ebc.com.br/economia/noticia/2024-01/governo-anuncia-cortes-de-gastos",
