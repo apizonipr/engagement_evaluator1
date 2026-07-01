@@ -253,4 +253,4 @@ de enquadramento narrativo.
 
 # Rodapé
 st.markdown("---")
-st.markdown("*Monitor de Enquadramento Midiático | Alicia (FGV) - Ferramenta de apoio à pesquisa acadêmica*")n()
+st.markdown("*Monitor de Enquadramento Midiático | Alicia (FGV) - Ferramenta de apoio à pesquisa acadêmica*")
