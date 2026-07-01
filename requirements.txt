@@ -1,8 +1,6 @@
 streamlit
 pandas
-textblob
-wordcloud
 matplotlib
+wordcloud
 nltk
-pillow
-numpy
+newspaper3k
