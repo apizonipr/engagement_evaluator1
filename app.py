@@ -1,9 +1,3 @@
-# 1. Instala a nova ferramenta de extração de notícias
-pip install streamlit pandas matplotlib wordcloud nltk newspaper3k
-
-# 2. Roda o novo aplicativo
-streamlit run monitor_enquadramento.py
-
 import streamlit as st
 import re
 from collections import Counter
