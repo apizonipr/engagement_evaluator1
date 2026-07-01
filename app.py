@@ -1,483 +1,256 @@
-import re
-import string
-from collections import Counter
-from datetime import datetime
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
 import streamlit as st
+import re
+from collections import Counter
+import matplotlib.pyplot as plt
 from wordcloud import WordCloud
+import nltk
+from newspaper import Article
 
-# =============================================================================
-# CONFIGURAÇÃO DA PÁGINA
-# =============================================================================
-st.set_page_config(
-    page_title="Monitor de Enquadramento Midiático - Alicia (FGV)",
-    page_icon="📰",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Baixar recursos do NLTK (silencioso)
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords', quiet=True)
 
-# =============================================================================
-# CONSTANTES E LÉXICO DE SENTIMENTO EM PORTUGUÊS
-# =============================================================================
-POSITIVE_WORDS_PT = {
-    "bom", "boa", "ótimo", "ótima", "excelente", "positivo", "positiva", "favorável",
-    "avanço", "avanços", "progresso", "sucesso", "crescimento", "recuperação", "melhora",
-    "benefício", "benefícios", "vantagem", "vantagens", "oportunidade", "oportunidades",
-    "esperança", "confiança", "fortalecimento", "fortalece", "estabilidade", "estável",
-    "eficiente", "eficaz", "inovação", "inovações", "desenvolvimento", "desenvolvimentos",
-    "sólido", "sólida", "resiliente", "resiliência", "ganho", "ganhos", "alta", "altas",
-    "aumento", "aumentos", "superávit", "lucro", "lucros", "expansão", "expansões",
-    "aprovação", "aprovações", "apoio", "apoios", "consenso", "harmonia", "celebrar",
-    "comemorar", "vitória", "vitórias", "conquista", "conquistas", "melhorar", "crescer",
+from nltk.corpus import stopwords
+
+# Configuração da página
+st.set_page_config(page_title="Monitor de Enquadramento Midiático - Alicia (FGV)", layout="wide")
+
+# Título e descrição acadêmica
+st.title("Monitor de Enquadramento Midiático")
+st.markdown("### Alicia - Projeto de Pesquisa | FGV")
+st.markdown("""
+Esta ferramenta auxilia na análise de enquadramento midiático, extraindo automaticamente 
+o conteúdo de reportagens a partir de suas URLs. A análise léxica identifica a polaridade 
+sentimental (positiva/negativa) e gera uma nuvem de palavras para visualização dos termos 
+mais frequentes. O comparador permite contrastar o enquadramento de veículos diferentes.
+""")
+
+# Lista de palavras-chave para análise de sentimento (simplificada e acadêmica)
+PALAVRAS_POSITIVAS = {
+    'avanço', 'progresso', 'sucesso', 'vitória', 'conquista', 'melhoria', 'crescimento',
+    'positivo', 'benefício', 'esperança', 'otimismo', 'eficiência', 'inovação', 'recuperação',
+    'estabilidade', 'prosperidade', 'consenso', 'acordo', 'tranquilidade', 'favorável'
 }
 
-NEGATIVE_WORDS_PT = {
-    "mau", "ruim", "péssimo", "negativo", "negativa", "desfavorável", "crise", "crises",
-    "queda", "quedas", "recuo", "retração", "recessão", "estagnação", "dificuldade",
-    "dificuldades", "problema", "problemas", "preocupação", "preocupações", "ameaça",
-    "ameaças", "risco", "riscos", "instabilidade", "instável", "incerteza", "incertezas",
-    "tensão", "tensões", "conflito", "conflitos", "escândalo", "escândalos", "corrupção",
-    "fracasso", "fracassos", "perda", "perdas", "déficit", "déficits", "divida", "dívidas",
-    "inflação", "desemprego", "pobreza", "desigualdade", "violência", "crime", "crimes",
-    "acusação", "acusações", "denúncia", "denúncias", "investigação", "investigações",
-    "cai", "cair", "diminuir", "reduzir", "retrair", "piorar", "declinar", "desacelerar",
-    "austeridade", "dificultar", "obstáculo", "obstáculos", "resistência", "resistências",
+PALAVRAS_NEGATIVAS = {
+    'crise', 'conflito', 'fracasso', 'perda', 'ataque', 'crítica', 'problema', 'negativo',
+    'medo', 'pessimismo', 'instabilidade', 'corrupção', 'escândalo', 'controvérsia', 'queda',
+    'recessão', 'desordem', 'violência', 'ameaça', 'prejuízo'
 }
 
-STOPWORDS_PT = {
-    "a", "à", "ao", "aos", "aquela", "aquelas", "aquele", "aqueles", "aquilo", "as", "às",
-    "até", "com", "como", "da", "das", "de", "dela", "delas", "dele", "deles", "depois",
-    "do", "dos", "e", "ela", "elas", "ele", "eles", "em", "entre", "era", "eram", "essa",
-    "essas", "esse", "esses", "esta", "estas", "este", "estes", "eu", "isso", "isto", "já",
-    "lhe", "lhes", "mais", "mas", "me", "mesma", "mesmas", "mesmo", "mesmos", "meu", "meus",
-    "minha", "minhas", "muito", "muitos", "na", "nas", "no", "nos", "nossa", "nossas",
-    "nosso", "nossos", "num", "numa", "nuns", "numas", "o", "os", "ou", "para", "pela",
-    "pelas", "pelo", "pelos", "por", "qual", "quando", "que", "quem", "se", "sem", "sua",
-    "suas", "também", "te", "teu", "teus", "tu", "tua", "tuas", "um", "uma", "uns", "umas",
-    "você", "vocês", "vos", "vosso", "vossos", "sobre", "sob", "ante", "após", "até", "desde",
-    "durante", "trás", "contra", "perante", "segundo", "sendo", "sendo", "sido", "ter", "ter",
-    "tendo", "ter", "teve", "tinha", "tive", "tiveram", "têm", "temos", "está", "estão", "estou",
-    "estamos", "estive", "estiveram", "estava", "estavam", "ser", "sendo", "sido", "é", "são",
-    "era", "eram", "foi", "foram", "fui", "fomos", "foram", "haver", "havendo", "havia", "houve",
-    "houveram", "há", "não", "sim", "nem", "já", "ainda", "agora", "antes", "depois", "sempre",
-    "nunca", "talvez", "apenas", "só", "tão", "tanto", "assim", "desta", "deste", "disso", "disto",
-    "daquilo", "daquele", "daquela", "desses", "destas", "destes", "disso", "nisso", "naquilo",
-    "nele", "nela", "neles", "nelas", "aqui", "ali", "lá", "onde", "cujo", "cuja", "cujos", "cujas",
-}
+# Stopwords em português
+STOPWORDS_PT = set(stopwords.words('portuguese'))
+STOPWORDS_PT.update(['segundo', 'após', 'sobre', 'diz', 'disse', 'afirma', 'afirmou', 'ainda', 'também'])
 
+def extrair_artigo(url):
+    """Extrai título e texto de uma URL usando newspaper3k."""
+    try:
+        artigo = Article(url, language='pt')
+        artigo.download()
+        artigo.parse()
+        return artigo.title, artigo.text
+    except Exception as e:
+        st.error(f"Erro ao extrair o artigo: {e}")
+        return None, None
 
-# =============================================================================
-# FUNÇÕES AUXILIARES
-# =============================================================================
-def clean_text(text: str) -> str:
-    """Normaliza o texto: minúsculas, remove URLs, menções, pontuação e dígitos."""
-    if not isinstance(text, str):
-        return ""
-    text = text.lower()
-    text = re.sub(r"http\S+|www\.\S+", "", text)
-    text = re.sub(r"@\w+|#\w+", "", text)
-    text = re.sub(r"\d+", "", text)
-    text = text.translate(str.maketrans("", "", string.punctuation))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+def preprocessar_texto(texto):
+    """Remove pontuação, números e normaliza para minúsculas."""
+    texto = re.sub(r'[^\w\s]', '', texto.lower())
+    texto = re.sub(r'\d+', '', texto)
+    return texto
 
-
-def tokenize(text: str) -> list:
-    """Tokeniza simplesmente por espaços após limpeza."""
-    return [t for t in clean_text(text).split() if t]
-
-
-def remove_stopwords(tokens: list) -> list:
-    """Remove stopwords em português."""
-    return [t for t in tokens if t not in STOPWORDS_PT and len(t) > 2]
-
-
-def extract_terms(text: str, top_n: int = 15) -> list:
-    """Retorna os termos mais frequentes (com exceção de stopwords)."""
-    tokens = remove_stopwords(tokenize(text))
-    counter = Counter(tokens)
-    return counter.most_common(top_n)
-
-
-def analyze_sentiment(text: str) -> dict:
-    """
-    Análise de sentimento baseada em léxico em português.
-    Retorna dicionário com label, score e contadores.
-    """
-    tokens = tokenize(text)
-    positive = sum(1 for t in tokens if t in POSITIVE_WORDS_PT)
-    negative = sum(1 for t in tokens if t in NEGATIVE_WORDS_PT)
-    total = positive + negative
-
+def analisar_sentimento(texto):
+    """Análise léxica simplificada de polaridade sentencial."""
+    palavras = texto.split()
+    pos_count = sum(1 for p in palavras if p in PALAVRAS_POSITIVAS)
+    neg_count = sum(1 for p in palavras if p in PALAVRAS_NEGATIVAS)
+    total = pos_count + neg_count
+    
     if total == 0:
-        label = "Neutro"
-        score = 0.0
+        polaridade = 0.0
+        classificacao = "Neutro"
     else:
-        score = (positive - negative) / total
-        if score > 0.15:
-            label = "Positivo"
-        elif score < -0.15:
-            label = "Negativo"
+        polaridade = (pos_count - neg_count) / total
+        if polaridade > 0.15:
+            classificacao = "Positivo"
+        elif polaridade < -0.15:
+            classificacao = "Negativo"
         else:
-            label = "Neutro"
-
+            classificacao = "Neutro"
+    
     return {
-        "label": label,
-        "score": round(score, 3),
-        "positive_words": positive,
-        "negative_words": negative,
+        'positivo': pos_count,
+        'negativo': neg_count,
+        'polaridade': polaridade,
+        'classificacao': classificacao
     }
 
-
-def sentiment_label_class(label: str) -> str:
-    """Retorna emoji + label traduzido para exibição."""
-    mapping = {
-        "Positivo": "🟢 Positivo",
-        "Neutro": "🟡 Neutro",
-        "Negativo": "🔴 Negativo",
-    }
-    return mapping.get(label, "⚪ Indefinido")
-
-
-# =============================================================================
-# FUNÇÕES DE VISUALIZAÇÃO
-# =============================================================================
-def build_wordcloud(text_corpus: str, width: int = 800, height: int = 400) -> plt.Figure:
-    """Gera uma nuvem de palavras a partir de um corpus de texto."""
-    tokens = remove_stopwords(tokenize(text_corpus))
-    if not tokens:
-        fig, ax = plt.subplots(figsize=(width / 100, height / 100))
-        ax.text(0.5, 0.5, "Sem dados suficientes para nuvem de palavras", ha="center", va="center")
-        ax.axis("off")
-        return fig
-
-    corpus = " ".join(tokens)
+def gerar_nuvem_palavras(texto, titulo):
+    """Gera e exibe uma nuvem de palavras."""
+    palavras_filtradas = [p for p in texto.split() if p not in STOPWORDS_PT and len(p) > 3]
+    texto_filtrado = ' '.join(palavras_filtradas)
+    
+    if not texto_filtrado.strip():
+        st.warning("Texto insuficiente para gerar a nuvem de palavras.")
+        return
+    
     wordcloud = WordCloud(
-        width=width,
-        height=height,
-        background_color="white",
-        colormap="Blues",
-        max_words=200,
-        stopwords=STOPWORDS_PT,
-        prefer_horizontal=0.9,
-        min_font_size=10,
-    ).generate(corpus)
+        width=800,
+        height=400,
+        background_color='white',
+        colormap='viridis',
+        max_words=100
+    ).generate(texto_filtrado)
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.imshow(wordcloud, interpolation='bilinear')
+    ax.set_title(titulo, fontsize=14, fontweight='bold')
+    ax.axis('off')
+    st.pyplot(fig)
+    plt.close()
 
-    fig, ax = plt.subplots(figsize=(width / 100, height / 100))
-    ax.imshow(wordcloud, interpolation="bilinear")
-    ax.axis("off")
-    return fig
+def obter_frequencia_termos(texto, top_n=15):
+    """Retorna os termos mais frequentes."""
+    palavras_filtradas = [p for p in texto.split() if p not in STOPWORDS_PT and len(p) > 3]
+    return Counter(palavras_filtradas).most_common(top_n)
 
+# Menu lateral
+st.sidebar.title("Navegação")
+aba = st.sidebar.radio("Selecione a funcionalidade:", ["Análise Individual", "Comparador de Veículos"])
 
-def plot_sentiment_distribution(df: pd.DataFrame) -> plt.Figure:
-    """Gera gráfico de barras com a distribuição de sentimentos."""
-    counts = df["sentiment_label"].value_counts().reindex(["Positivo", "Neutro", "Negativo"]).fillna(0)
-    colors = ["#2ecc71", "#f1c40f", "#e74c3c"]
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    bars = ax.bar(counts.index, counts.values, color=colors, edgecolor="black")
-    ax.set_ylabel("Quantidade de notícias")
-    ax.set_title("Distribuição de Sentimento")
-    ax.set_ylim(0, max(counts.values.max() * 1.1, 1))
-    for bar in bars:
-        height = bar.get_height()
-        ax.annotate(
-            f"{int(height)}",
-            xy=(bar.get_x() + bar.get_width() / 2, height),
-            xytext=(0, 3),
-            textcoords="offset points",
-            ha="center",
-            va="bottom",
-            fontweight="bold",
-        )
-    return fig
+# =====================
+# Análise Individual
+# =====================
+if aba == "Análise Individual":
+    st.header("Análise de Enquadramento Individual")
+    
+    url = st.text_input("Insira a URL da reportagem:", placeholder="https://www.exemplo.com/reportagem...")
+    
+    if st.button("Analisar Reportagem", key="btn_individual"):
+        if url:
+            with st.spinner("Extraindo conteúdo da URL..."):
+                titulo, texto = extrair_artigo(url)
+            
+            if texto:
+                texto_proc = preprocessar_texto(texto)
+                resultado = analisar_sentimento(texto_proc)
+                
+                st.subheader(titulo)
+                st.markdown(f"**Fonte:** {url}")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Classificação", resultado['classificacao'])
+                with col2:
+                    st.metric("Menções Positivas", resultado['positivo'])
+                with col3:
+                    st.metric("Menções Negativas", resultado['negativo'])
+                
+                st.markdown("---")
+                st.markdown("### Nuvem de Palavras")
+                gerar_nuvem_palavras(texto_proc, "Termos mais frequentes na reportagem")
+                
+                st.markdown("### Termos mais frequentes")
+                freq = obter_frequencia_termos(texto_proc)
+                if freq:
+                    df_freq = st.dataframe(
+                        [{"Termo": t, "Frequência": f} for t, f in freq],
+                        use_container_width=True
+                    )
+            else:
+                st.error("Não foi possível extrair o conteúdo. Verifique a URL informada.")
+        else:
+            st.warning("Por favor, insira uma URL válida.")
 
+# =====================
+# Comparador de Veículos
+# =====================
+elif aba == "Comparador de Veículos":
+    st.header("Comparador de Enquadramento entre Veículos")
+    st.markdown("Insira duas URLs de reportagens sobre o mesmo fato de veículos diferentes para comparar os enquadramentos.")
+    
+    col_url1, col_url2 = st.columns(2)
+    
+    with col_url1:
+        url1 = st.text_input("URL - Veículo A", placeholder="https://www.veiculoA.com/reportagem...")
+    with col_url2:
+        url2 = st.text_input("URL - Veículo B", placeholder="https://www.veiculoB.com/reportagem...")
+    
+    if st.button("Comparar Enquadramentos", key="btn_comparador"):
+        if url1 and url2:
+            with st.spinner("Extraindo conteúdo dos veículos..."):
+                titulo1, texto1 = extrair_artigo(url1)
+                titulo2, texto2 = extrair_artigo(url2)
+            
+            if texto1 and texto2:
+                texto1_proc = preprocessar_texto(texto1)
+                texto2_proc = preprocessar_texto(texto2)
+                
+                res1 = analisar_sentimento(texto1_proc)
+                res2 = analisar_sentimento(texto2_proc)
+                
+                st.markdown("---")
+                col_a, col_b = st.columns(2)
+                
+                with col_a:
+                    st.subheader("Veículo A")
+                    st.markdown(f"**Título:** {titulo1}")
+                    st.markdown(f"**Fonte:** {url1}")
+                    
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Classificação", res1['classificacao'])
+                    m2.metric("Positivas", res1['positivo'])
+                    m3.metric("Negativas", res1['negativo'])
+                    
+                    gerar_nuvem_palavras(texto1_proc, "Nuvem - Veículo A")
+                    
+                    st.markdown("**Termos frequentes:**")
+                    freq1 = obter_frequencia_termos(texto1_proc, top_n=10)
+                    st.dataframe([{"Termo": t, "Frequência": f} for t, f in freq1], use_container_width=True)
+                
+                with col_b:
+                    st.subheader("Veículo B")
+                    st.markdown(f"**Título:** {titulo2}")
+                    st.markdown(f"**Fonte:** {url2}")
+                    
+                    m4, m5, m6 = st.columns(3)
+                    m4.metric("Classificação", res2['classificacao'])
+                    m5.metric("Positivas", res2['positivo'])
+                    m6.metric("Negativas", res2['negativo'])
+                    
+                    gerar_nuvem_palavras(texto2_proc, "Nuvem - Veículo B")
+                    
+                    st.markdown("**Termos frequentes:**")
+                    freq2 = obter_frequencia_termos(texto2_proc, top_n=10)
+                    st.dataframe([{"Termo": t, "Frequência": f} for t, f in freq2], use_container_width=True)
+                
+                st.markdown("---")
+                st.subheader("Síntese Comparativa")
+                
+                comp_col1, comp_col2, comp_col3 = st.columns(3)
+                with comp_col1:
+                    delta_pos = res1['positivo'] - res2['positivo']
+                    st.metric("Diferença de Menções Positivas (A - B)", delta_pos)
+                with comp_col2:
+                    delta_neg = res1['negativo'] - res2['negativo']
+                    st.metric("Diferença de Menções Negativas (A - B)", delta_neg)
+                with comp_col3:
+                    delta_pol = res1['polaridade'] - res2['polaridade']
+                    st.metric("Diferença de Polaridade (A - B)", f"{delta_pol:.2f}")
+                
+                st.markdown("""
+                **Interpretação acadêmica:** A diferença de polaridade entre os veículos pode indicar 
+ênfases distintas na cobertura do mesmo fato, revelando possíveis vieses editoriais ou escolhas 
+de enquadramento narrativo.
+                """)
+            else:
+                st.error("Não foi possível extrair o conteúdo de uma ou ambas as URLs. Verifique os links informados.")
+        else:
+            st.warning("Por favor, insira ambas as URLs para realizar a comparação.")
 
-def plot_sentiment_timeline(df: pd.DataFrame) -> plt.Figure:
-    """Gera gráfico de linha temporal do sentimento médio."""
-    if "date" not in df.columns or df["date"].isna().all():
-        fig, ax = plt.subplots(figsize=(8, 4.5))
-        ax.text(0.5, 0.5, "Data não disponível para linha temporal", ha="center", va="center")
-        ax.axis("off")
-        return fig
-
-    timeline = df.dropna(subset=["date"]).copy()
-    timeline["date_only"] = pd.to_datetime(timeline["date"]).dt.date
-    daily = timeline.groupby("date_only").agg(
-        avg_score=("sentiment_score", "mean"),
-        count=("sentiment_score", "size"),
-    ).reset_index()
-
-    fig, ax = plt.subplots(figsize=(10, 4.5))
-    ax.plot(daily["date_only"], daily["avg_score"], marker="o", color="#3498db", linewidth=2)
-    ax.axhline(0, color="gray", linestyle="--", linewidth=0.8)
-    ax.set_xlabel("Data")
-    ax.set_ylabel("Score médio de sentimento")
-    ax.set_title("Evolução do Sentimento ao Longo do Tempo")
-    ax.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    return fig
-
-
-# =============================================================================
-# GERAÇÃO DE DADOS DE EXEMPLO
-# =============================================================================
-def generate_sample_data(n: int = 20) -> pd.DataFrame:
-    """Gera um conjunto de notícias fictícias para demonstração."""
-    np.random.seed(42)
-    templates = [
-        ("Mercado financeiro apresenta alta expressiva e investidores comemoram resultados", "Positivo"),
-        ("Novo projeto de lei gera preocupação entre economistas e analistas", "Negativo"),
-        ("Ministro anuncia medidas para fortalecer a educação e reduzir desigualdades", "Positivo"),
-        ("Crise política afeta aprovação de reformas e aumenta tensão no Congresso", "Negativo"),
-        ("Estudo aponta avanço na recuperação econômica e crescimento do PIB", "Positivo"),
-        ("Empresas relatam dificuldades com alta de custos e queda na demanda", "Negativo"),
-        ("Tecnologia inovadora promete transformar o setor produtivo", "Positivo"),
-        ("Debates sobre orçamento geram instabilidade e incertezas no mercado", "Negativo"),
-        ("Governo investe em infraestrutura e cria oportunidades de desenvolvimento", "Positivo"),
-        ("Escândalo de corrupção investigado pela Polícia Federal gera crise", "Negativo"),
-    ]
-
-    rows = []
-    for i in range(n):
-        template, _ = templates[i % len(templates)]
-        date = pd.Timestamp("2024-01-01") + pd.Timedelta(days=i * 2)
-        rows.append(
-            {
-                "id": i + 1,
-                "date": date,
-                "source": np.random.choice(["Portal A", "Jornal B", "Revista C", "Agência D"]),
-                "title": f"{template} #{i+1}",
-                "content": f"{template}. "
-                "Analistas destacam que os próximos meses serão decisivos para entender os impactos. "
-                "A sociedade acompanha de perto as novas medidas e seus efeitos no cotidiano.",
-                "url": f"https://exemplo.com/noticia/{i+1}",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-# =============================================================================
-# CARREGAMENTO E PROCESSAMENTO
-# =============================================================================
-def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Aplica análise de sentimento e extrai termos no DataFrame."""
-    df = df.copy()
-    df["text_for_analysis"] = df.apply(
-        lambda row: f"{row.get('title', '')} {row.get('content', '')}", axis=1
-    )
-
-    sentiment_data = df["text_for_analysis"].apply(analyze_sentiment)
-    df["sentiment_label"] = sentiment_data.apply(lambda x: x["label"])
-    df["sentiment_score"] = sentiment_data.apply(lambda x: x["score"])
-    df["positive_words"] = sentiment_data.apply(lambda x: x["positive_words"])
-    df["negative_words"] = sentiment_data.apply(lambda x: x["negative_words"])
-
-    df["top_terms"] = df["text_for_analysis"].apply(lambda x: extract_terms(x, top_n=10))
-    return df
-
-
-def load_uploaded_data(file) -> pd.DataFrame:
-    """Carrega CSV ou Excel enviado pelo usuário."""
-    name = file.name.lower()
-    if name.endswith(".csv"):
-        return pd.read_csv(file)
-    if name.endswith((".xlsx", ".xls")):
-        return pd.read_excel(file)
-    raise ValueError("Formato de arquivo não suportado. Envie CSV ou Excel.")
-
-
-# =============================================================================
-# SEÇÕES DO APLICATIVO
-# =============================================================================
-def render_header():
-    st.title("📰 Monitor de Enquadramento Midiático")
-    st.markdown("**Alicia (FGV)** – Análise de sentimento, nuvem de palavras e comparador de notícias")
-    st.markdown("---")
-
-
-def render_sidebar():
-    with st.sidebar:
-        st.header("⚙️ Configurações")
-        st.markdown("Carregue um arquivo CSV/Excel com as colunas: `title`, `content`, `date` (opcional) e `source` (opcional).")
-        uploaded_file = st.file_uploader("Upload de notícias", type=["csv", "xlsx", "xls"])
-        st.markdown("---")
-        st.markdown("**Legenda de sentimento:**")
-        st.markdown("🟢 Positivo  \n🟡 Neutro  \n🔴 Negativo")
-    return uploaded_file
-
-
-def render_metrics(df: pd.DataFrame):
-    total = len(df)
-    pos = (df["sentiment_label"] == "Positivo").sum()
-    neu = (df["sentiment_label"] == "Neutro").sum()
-    neg = (df["sentiment_label"] == "Negativo").sum()
-    avg_score = df["sentiment_score"].mean()
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total de notícias", total)
-    col2.metric("Positivas", pos)
-    col3.metric("Neutras", neu)
-    col4.metric("Negativas", neg)
-    col5.metric("Score médio", round(avg_score, 3))
-    st.markdown("---")
-
-
-def render_data_table(df: pd.DataFrame):
-    st.subheader("📋 Notícias analisadas")
-    display_df = df[["title", "source", "date", "sentiment_label", "sentiment_score"]].copy()
-    display_df.columns = ["Título", "Fonte", "Data", "Sentimento", "Score"]
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-
-def render_sentiment_analysis(df: pd.DataFrame):
-    st.subheader("📊 Análise de Sentimento")
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.pyplot(plot_sentiment_distribution(df))
-    with col2:
-        st.pyplot(plot_sentiment_timeline(df))
-
-    st.markdown("#### Detalhamento por notícia")
-    selected = st.selectbox("Selecione uma notícia para ver detalhes", options=df["title"].tolist())
-    row = df[df["title"] == selected].iloc[0]
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Sentimento", sentiment_label_class(row["sentiment_label"]))
-    col_b.metric("Score", row["sentiment_score"])
-    col_c.metric("Fonte", row.get("source", "N/D"))
-    st.markdown(f"**Conteúdo:** {row['content']}")
-    st.markdown(f"**URL:** {row.get('url', 'N/D')}")
-
-
-
-def render_wordcloud(df: pd.DataFrame):
-    st.subheader("☁️ Nuvem de Palavras")
-    st.markdown("Palavras mais frequentes considerando todo o corpus de notícias.")
-
-    sentiment_filter = st.segmented_control(
-        "Filtrar nuvem por sentimento:",
-        options=["Todas", "Positivas", "Neutras", "Negativas"],
-        default="Todas",
-    )
-
-    map_filter = {"Todas": None, "Positivas": "Positivo", "Neutras": "Neutro", "Negativas": "Negativo"}
-    selected_label = map_filter.get(sentiment_filter)
-
-    if selected_label:
-        corpus_df = df[df["sentiment_label"] == selected_label]
-        st.info(f"Nuvem gerada com {len(corpus_df)} notícias {sentiment_filter.lower()}.")
-    else:
-        corpus_df = df
-
-    if corpus_df.empty:
-        st.warning("Não há notícias suficientes para gerar a nuvem com esse filtro.")
-        return
-
-    corpus_text = " ".join(corpus_df["text_for_analysis"].fillna(""))
-    st.pyplot(build_wordcloud(corpus_text))
-
-
-
-def render_news_comparator(df: pd.DataFrame):
-    st.subheader("⚖️ Comparador de Notícias")
-    st.markdown("Selecione duas notícias para comparar enquadramento, sentimento e termos.")
-
-    titles = df["title"].tolist()
-    col1, col2 = st.columns(2)
-    with col1:
-        title_a = st.selectbox("Notícia A", options=titles, index=0, key="news_a")
-    with col2:
-        title_b = st.selectbox("Notícia B", options=titles, index=min(1, len(titles) - 1), key="news_b")
-
-    if title_a == title_b:
-        st.warning("Selecione duas notícias distintas para comparar.")
-        return
-
-    row_a = df[df["title"] == title_a].iloc[0]
-    row_b = df[df["title"] == title_b].iloc[0]
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f"### 🅰️ {row_a['title']}")
-        st.markdown(f"**Fonte:** {row_a.get('source', 'N/D')} | **Data:** {row_a.get('date', 'N/D')}")
-        st.metric("Sentimento", sentiment_label_class(row_a["sentiment_label"]))
-        st.metric("Score", row_a["sentiment_score"])
-        st.markdown(f"**Resumo:** {row_a['content']}")
-        st.markdown("**Termos principais:** " + ", ".join([t for t, _ in row_a["top_terms"]]))
-
-    with c2:
-        st.markdown(f"### 🅱️ {row_b['title']}")
-        st.markdown(f"**Fonte:** {row_b.get('source', 'N/D')} | **Data:** {row_b.get('date', 'N/D')}")
-        st.metric("Sentimento", sentiment_label_class(row_b["sentiment_label"]))
-        st.metric("Score", row_b["sentiment_score"])
-        st.markdown(f"**Resumo:** {row_b['content']}")
-        st.markdown("**Termos principais:** " + ", ".join([t for t, _ in row_b["top_terms"]]))
-
-    st.markdown("---")
-    st.markdown("#### 🔍 Comparativo de sentimento")
-    diff_score = row_a["sentiment_score"] - row_b["sentiment_score"]
-    if row_a["sentiment_label"] == row_b["sentiment_label"]:
-        st.info(f"Ambas as notícias têm enquadramento **{row_a['sentiment_label'].lower()}** (diferença de score: {abs(diff_score):.3f}).")
-    else:
-        st.warning(
-            f"Enquadramento divergente: notícia A é **{row_a['sentiment_label'].lower()}** "
-            f"enquanto a notícia B é **{row_b['sentiment_label'].lower()}**."
-        )
-
-
-
-def render_export(df: pd.DataFrame):
-    st.markdown("---")
-    st.subheader("💾 Exportar resultados")
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Baixar análise em CSV",
-        data=csv,
-        file_name=f"analise_sentimento_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv",
-    )
-
-
-# =============================================================================
-# APLICATIVO PRINCIPAL
-# =============================================================================
-def main():
-    render_header()
-    uploaded_file = render_sidebar()
-
-    if uploaded_file is not None:
-        try:
-            raw_df = load_uploaded_data(uploaded_file)
-            st.success(f"Arquivo carregado: {uploaded_file.name} ({len(raw_df)} registros)")
-        except Exception as e:
-            st.error(f"Erro ao carregar arquivo: {e}")
-            return
-    else:
-        raw_df = generate_sample_data(n=20)
-        st.info("Usando dados de exemplo. Carregue um arquivo CSV/Excel na barra lateral para análise real.")
-
-    # Garante colunas mínimas
-    if "title" not in raw_df.columns and "content" not in raw_df.columns:
-        st.error("O arquivo deve conter pelo menos uma das colunas: 'title' ou 'content'.")
-        return
-
-    raw_df["title"] = raw_df.get("title", "")
-    raw_df["content"] = raw_df.get("content", "")
-    raw_df["source"] = raw_df.get("source", "N/D")
-    raw_df["date"] = pd.to_datetime(raw_df.get("date", pd.NaT), errors="coerce")
-
-    df = process_dataframe(raw_df)
-
-    render_metrics(df)
-    render_sentiment_analysis(df)
-    render_wordcloud(df)
-    render_news_comparator(df)
-    render_data_table(df)
-    render_export(df)
-
-
-if __name__ == "__main__":
-    main()
+# Rodapé
+st.markdown("---")
+st.markdown("*Monitor de Enquadramento Midiático | Alicia (FGV) - Ferramenta de apoio à pesquisa acadêmica*")n()
