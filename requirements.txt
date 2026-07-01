@@ -5,3 +5,4 @@ wordcloud
 matplotlib
 nltk
 pillow
+numpy
