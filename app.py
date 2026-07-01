@@ -1,6 +1,3 @@
-pip install streamlit pandas matplotlib wordcloud openpyxl
-streamlit run monitor_enquadramento_midia.py
-
 import re
 import string
 from collections import Counter
